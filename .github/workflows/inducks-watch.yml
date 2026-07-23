@@ -44,19 +44,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TITLE="🦆 Le dump inducks isv.tgz est de retour"
+          TITLE="Le dump inducks isv.tgz est de retour"
           existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq 'length')
           if [ "$existing" -gt 0 ]; then
-            echo "Une issue est déjà ouverte, rien à signaler."
+            echo "Une issue est deja ouverte, rien a signaler."
             exit 0
           fi
-          gh issue create \
-            --title "$TITLE" \
-            --body "Le dump \`isv.tgz\` répond de nouveau (HTTP 200) sur https://inducks.org/inducks/isv.tgz.
-
-- **Taille :** ${{ env.size }}
-- **SHA256 :** \`${{ env.sha }}\`
-- **Run :** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-- **Artifact :** \`isv-${{ github.run_number }}\` (section *Artifacts* du run ci-dessus, conservé 90 jours)
-
-_Issue ouverte automatiquement par le workflow inducks-watch. Ferme-la une fois le dump récupéré pour réarmer la surveillance._"
+          BODY=$(printf '%s\n' \
+            "Le dump \`isv.tgz\` repond de nouveau (HTTP 200) sur https://inducks.org/inducks/isv.tgz." \
+            "" \
+            "- **Taille :** ${{ env.size }}" \
+            "- **SHA256 :** \`${{ env.sha }}\`" \
+            "- **Run :** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "- **Artifact :** \`isv-${{ github.run_number }}\` (section Artifacts du run ci-dessus, conserve 90 jours)" \
+            "" \
+            "_Issue ouverte automatiquement par le workflow inducks-watch. Ferme-la une fois le dump recupere pour rearmer la surveillance._")
+          gh issue create --title "$TITLE" --body "$BODY"
