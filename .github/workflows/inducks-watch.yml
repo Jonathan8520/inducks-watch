@@ -1,0 +1,31 @@
+name: inducks-watch
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe dump
+        run: |
+          CODE=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 30 \
+            https://inducks.org/inducks/isv.tgz || echo 000)
+          echo "status=$CODE" >> $GITHUB_ENV
+          echo "Status: $CODE"
+
+      - name: Download if back
+        if: env.status == '200'
+        run: |
+          curl -L -o isv.tgz https://inducks.org/inducks/isv.tgz
+          ls -lh isv.tgz && sha256sum isv.tgz
+          tar tzf isv.tgz | head
+
+      - name: Upload artifact
+        if: env.status == '200'
+        uses: actions/upload-artifact@v4
+        with:
+          name: isv-${{ github.run_number }}
+          path: isv.tgz
+          retention-days: 90
