@@ -4,6 +4,10 @@ on:
     - cron: '0 */4 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -19,7 +23,12 @@ jobs:
         if: env.status == '200'
         run: |
           curl -L -o isv.tgz https://inducks.org/inducks/isv.tgz
-          ls -lh isv.tgz && sha256sum isv.tgz
+          ls -lh isv.tgz
+          SHA=$(sha256sum isv.tgz | awk '{print $1}')
+          SIZE=$(du -h isv.tgz | awk '{print $1}')
+          echo "sha=$SHA" >> $GITHUB_ENV
+          echo "size=$SIZE" >> $GITHUB_ENV
+          echo "sha256=$SHA  size=$SIZE"
           tar tzf isv.tgz | head
 
       - name: Upload artifact
@@ -29,3 +38,25 @@ jobs:
           name: isv-${{ github.run_number }}
           path: isv.tgz
           retention-days: 90
+
+      - name: Open issue if back
+        if: env.status == '200'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="🦆 Le dump inducks isv.tgz est de retour"
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq 'length')
+          if [ "$existing" -gt 0 ]; then
+            echo "Une issue est déjà ouverte, rien à signaler."
+            exit 0
+          fi
+          gh issue create \
+            --title "$TITLE" \
+            --body "Le dump \`isv.tgz\` répond de nouveau (HTTP 200) sur https://inducks.org/inducks/isv.tgz.
+
+- **Taille :** ${{ env.size }}
+- **SHA256 :** \`${{ env.sha }}\`
+- **Run :** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+- **Artifact :** \`isv-${{ github.run_number }}\` (section *Artifacts* du run ci-dessus, conservé 90 jours)
+
+_Issue ouverte automatiquement par le workflow inducks-watch. Ferme-la une fois le dump récupéré pour réarmer la surveillance._"
