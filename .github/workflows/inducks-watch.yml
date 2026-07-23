@@ -1,4 +1,5 @@
 name: inducks-watch
+
 on:
   schedule:
     - cron: '0 */4 * * *'
@@ -14,22 +15,55 @@ jobs:
     steps:
       - name: Probe dump
         run: |
-          CODE=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 30 \
-            https://inducks.org/inducks/isv.tgz || echo 000)
-          echo "status=$CODE" >> $GITHUB_ENV
-          echo "Status: $CODE"
+          HDRS=$(curl -sIL --max-time 30 https://inducks.org/inducks/isv.tgz || true)
+          CODE=$(printf '%s' "$HDRS" | grep -oiE '^HTTP/[0-9.]+ [0-9]+' | tail -1 | awk '{print $2}')
+          CTYPE=$(printf '%s' "$HDRS" | grep -oiE '^content-type:.*' | tail -1 | tr -d '\r')
+          CLEN=$(printf '%s' "$HDRS" | grep -oiE '^content-length:.*' | tail -1 | tr -d '\r')
+          echo "HTTP=${CODE:-none}"
+          echo "${CTYPE:-content-type: (absent)}"
+          echo "${CLEN:-content-length: (absent)}"
+
+          # Un 200 ne suffit pas : Anubis ou une page de maintenance peuvent
+          # repondre 200 avec du HTML. On exige un type de contenu binaire.
+          if [ "$CODE" = "200" ] && printf '%s' "$CTYPE" | grep -qiE 'gzip|octet-stream|x-tar|application/tar'; then
+            echo "status=200" >> $GITHUB_ENV
+            echo "Dump disponible."
+          else
+            echo "status=notyet" >> $GITHUB_ENV
+            echo "Toujours indisponible (ou reponse non binaire)."
+          fi
 
       - name: Download if back
         if: env.status == '200'
         run: |
-          curl -L -o isv.tgz https://inducks.org/inducks/isv.tgz
-          ls -lh isv.tgz
+          # -f : echoue sur erreur HTTP au lieu d'enregistrer la page d'erreur
+          # --retry : reprend sur coupure reseau (fichier ~109 Mo)
+          curl -fL --retry 3 --retry-delay 5 --max-time 900 \
+            -o isv.tgz https://inducks.org/inducks/isv.tgz
+
+          echo "--- type reel ---"
+          file isv.tgz
+
+          # Garde-fou : si ce n'est pas une archive gzip valide, on stoppe ici
+          # plutot que d'ouvrir une issue annoncant un dump qu'on n'a pas.
+          if ! tar tzf isv.tgz > /dev/null 2>&1; then
+            echo "::error::Le fichier telecharge n'est pas une archive tar.gz valide."
+            head -c 500 isv.tgz
+            exit 1
+          fi
+
           SHA=$(sha256sum isv.tgz | awk '{print $1}')
           SIZE=$(du -h isv.tgz | awk '{print $1}')
+          BYTES=$(stat -c%s isv.tgz)
+          COUNT=$(tar tzf isv.tgz | wc -l)
+
           echo "sha=$SHA" >> $GITHUB_ENV
           echo "size=$SIZE" >> $GITHUB_ENV
-          echo "sha256=$SHA  size=$SIZE"
-          tar tzf isv.tgz | head
+          echo "bytes=$BYTES" >> $GITHUB_ENV
+          echo "count=$COUNT" >> $GITHUB_ENV
+
+          echo "--- $COUNT fichiers, $SIZE, sha256 $SHA ---"
+          tar tzf isv.tgz | head -20
 
       - name: Upload artifact
         if: env.status == '200'
@@ -51,12 +85,16 @@ jobs:
             exit 0
           fi
           BODY=$(printf '%s\n' \
-            "Le dump \`isv.tgz\` repond de nouveau (HTTP 200) sur https://inducks.org/inducks/isv.tgz." \
+            "Le dump \`isv.tgz\` repond de nouveau sur https://inducks.org/inducks/isv.tgz et l'archive a ete validee." \
             "" \
-            "- **Taille :** ${{ env.size }}" \
+            "- **Taille :** ${{ env.size }} (${{ env.bytes }} octets)" \
+            "- **Fichiers dans l'archive :** ${{ env.count }}" \
             "- **SHA256 :** \`${{ env.sha }}\`" \
             "- **Run :** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-            "- **Artifact :** \`isv-${{ github.run_number }}\` (section Artifacts du run ci-dessus, conserve 90 jours)" \
+            "- **Artifact :** \`isv-${{ github.run_number }}\` (section Artifacts du run, conserve 90 jours)" \
             "" \
-            "_Issue ouverte automatiquement par le workflow inducks-watch. Ferme-la une fois le dump recupere pour rearmer la surveillance._")
+            "A comparer avec la sauvegarde communautaire du 5 juillet 2026 pour estimer" \
+            "l'ecart d'indexation eventuellement perdu lors de la restauration." \
+            "" \
+            "_Issue ouverte automatiquement par inducks-watch. Ferme-la une fois le dump recupere pour rearmer la surveillance._")
           gh issue create --title "$TITLE" --body "$BODY"
